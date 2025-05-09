@@ -22,6 +22,7 @@
 
 using namespace Parsers;
 
+static const std::set<std::string> mountdir_list = {"/data/adb", "/debug_ramdisk"};
 static const std::set<std::string> fsname_list = {"KSU", "APatch", "magisk", "worker"};
 static const std::unordered_map<std::string, int> mount_flags_procfs = {
     {"nosuid", MS_NOSUID},
@@ -38,32 +39,31 @@ static bool shouldUnmount(const mountinfo_entry &mount, const mountinfo_root_res
     const auto &mount_point = mount.getMountPoint();
     const auto &type = mount.getFilesystemType();
 
-    // Mount is from /data/adb
-    if (true_root.starts_with("/data/adb"))
-        return true;
+    // Unmount all mounts from and to directories in mountdir_list
+    for (const auto &mountdir : mountdir_list)
+    {
+        if (true_root.starts_with(mountdir) || mount_point.starts_with(mountdir))
+            return true;
 
-    // Mount is to /data/adb
-    if (mount_point.starts_with("/data/adb"))
-        return true;
+        // Unmount all overlayfs with lowerdir/upperdir/workdir in mountdir_list
+        if (type == "overlay")
+        {
+            const auto &options = mount.getSuperOptions();
+
+            if (options.contains("lowerdir") && options.at("lowerdir").starts_with(mountdir))
+                return true;
+
+            if (options.contains("upperdir") && options.at("upperdir").starts_with(mountdir))
+                return true;
+
+            if (options.contains("workdir") && options.at("workdir").starts_with(mountdir))
+                return true;
+        }
+    }
 
     // Unmount all module overlayfs and tmpfs
     if ((type == "overlay" || type == "tmpfs") && fsname_list.contains(mount.getMountSource()))
         return true;
-
-    // Unmount all overlayfs with lowerdir/upperdir/workdir starting with /data/adb
-    if (type == "overlay")
-    {
-        const auto &options = mount.getSuperOptions();
-
-        if (options.contains("lowerdir") && options.at("lowerdir").starts_with("/data/adb"))
-            return true;
-
-        if (options.contains("upperdir") && options.at("upperdir").starts_with("/data/adb"))
-            return true;
-
-        if (options.contains("workdir") && options.at("workdir").starts_with("/data/adb"))
-            return true;
-    }
 
     return false;
 }
